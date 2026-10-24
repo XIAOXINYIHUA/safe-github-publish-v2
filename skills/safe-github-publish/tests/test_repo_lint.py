@@ -157,8 +157,20 @@ class RepoLintTests(unittest.TestCase):
             write(root, "README.md", readme)
             write(root, "LICENSE", "MIT\n")
             write(root, ".gitignore", "x\n")
+            write(root, "Docs/screen.png", "x")
             checks = {f["check"] for f in repo_lint.lint(root) if f["severity"] == "warn"}
             self.assertIn("readme-empty-section", checks)
+
+    def test_container_heading_with_only_subsections_is_not_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            readme = GOOD_README + "\n## 功能模块\n\n### 变化检测\n\n- 七种指数\n\n### 分类\n\n- 多类别\n"
+            write(root, "README.md", readme)
+            write(root, "LICENSE", "MIT\n")
+            write(root, ".gitignore", "x\n")
+            write(root, "Docs/screen.png", "x")
+            findings = repo_lint.lint(root)
+            self.assertNotIn("readme-empty-section", {f["check"] for f in findings})
 
     def test_multiple_h1_is_warning_and_badge_overflow(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

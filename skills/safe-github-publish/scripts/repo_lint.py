@@ -106,10 +106,18 @@ def check_readme(root: Path, readme: Path, index: dict[str, set[str]], findings:
     if badge_count > MAX_BADGES:
         findings.append({"severity": "warn", "check": "readme-badges", "message": f"badge 数量 {badge_count} 超过 {MAX_BADGES}，只保留可验证的状态"})
 
-    headings = [(i + 1, line) for i, (line, fenced) in enumerate(lines) if not fenced and re.match(r"^#{1,6}\s", line)]
+    headings = []
+    for i, (line, fenced) in enumerate(lines):
+        if fenced:
+            continue
+        match = re.match(r"^(#{1,6})\s", line)
+        if match:
+            headings.append((i + 1, len(match.group(1)), line))
     for idx in range(len(headings) - 1):
-        line_no, heading = headings[idx]
-        next_line_no, _ = headings[idx + 1]
+        line_no, level, heading = headings[idx]
+        next_line_no, next_level, _ = headings[idx + 1]
+        if next_level > level:
+            continue  # 容器标题：直接进入子章节，属正当结构，不算空
         between = [ln for ln, _ in lines[line_no:next_line_no - 1] if ln.strip()]
         if not between:
             findings.append({"severity": "warn", "check": "readme-empty-section", "message": f"空章节: 第 {line_no} 行 “{heading.strip()}”"})
