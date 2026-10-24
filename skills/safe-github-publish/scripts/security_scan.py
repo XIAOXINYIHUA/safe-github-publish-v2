@@ -451,6 +451,12 @@ def scan(root: Path, scan_history_flag: bool = False, staged_flag: bool = False,
 
 
 def main() -> int:
+    # 英文 locale 的 Windows 管道默认 cp1252，输出中文会 UnicodeEncodeError
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", nargs="?", default=".", help="项目根目录")
     parser.add_argument("--json", action="store_true", help="输出 JSON")

@@ -18,4 +18,6 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Run unit tests
+        env:
+          PYTHONUTF8: "1"
         run: python -m unittest discover -s skills/safe-github-publish/tests -v

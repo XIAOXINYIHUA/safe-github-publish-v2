@@ -222,9 +222,11 @@ class OutputSafetyTests(unittest.TestCase):
             (root / "config.txt").write_text(secret_value, encoding="utf-8")
 
             text_result = subprocess.run(
-                [sys.executable, str(SCRIPT), str(root)], capture_output=True, text=True, check=False)
+                [sys.executable, str(SCRIPT), str(root)], capture_output=True, text=True,
+                check=False, encoding="utf-8", errors="replace")
             json_result = subprocess.run(
-                [sys.executable, str(SCRIPT), str(root), "--json"], capture_output=True, text=True, check=False)
+                [sys.executable, str(SCRIPT), str(root), "--json"], capture_output=True, text=True,
+                check=False, encoding="utf-8", errors="replace")
 
             self.assertEqual(text_result.returncode, 2)
             self.assertEqual(json_result.returncode, 2)

@@ -25,8 +25,12 @@
 
 ### Changed
 
-- `privacy_scan.py` 更名为 `security_scan.py`；输出增加 `scope`（worktree/history/staged）字段
+- `privacy_scan.py` 更名为 `security_scan.py`；输出增加 `scope`（worktree/history/staged/unpushed）字段
 - `.gitignore` 建议清单合并进 privacy-checklist，按技术栈裁剪而非机械全加
+
+### Fixed
+
+- 英文 locale 的 Windows（如 GitHub Actions windows-latest）管道编码为 cp1252，脚本输出中文触发 `UnicodeEncodeError`：security_scan / repo_lint / push_guard 三个入口统一把 stdout/stderr 重配置为 UTF-8，测试 subprocess 解码显式 UTF-8，CI 增加 `PYTHONUTF8=1`
 
 ### Security
 

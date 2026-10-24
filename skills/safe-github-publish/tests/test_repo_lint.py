@@ -178,19 +178,19 @@ class RepoLintTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             write(root, "README.md", "# T\n\n正文\n")  # 无 quick start → error；缺 license/gitignore → warn
-            result = subprocess.run([sys.executable, str(SCRIPT), str(root)], capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(SCRIPT), str(root)], capture_output=True, text=True, encoding="utf-8", errors="replace")
             self.assertEqual(result.returncode, 2)
 
             # 阶段二：结构完整、链接可达，仅缺 LICENSE 文件与 .gitignore → 只有 warn
             readme = GOOD_README.replace("MIT（见 [LICENSE](LICENSE)）。", "License 待定。")
             write(root, "README.md", readme)
             write(root, "Docs/screen.png", "x")
-            result = subprocess.run([sys.executable, str(SCRIPT), str(root)], capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(SCRIPT), str(root)], capture_output=True, text=True, encoding="utf-8", errors="replace")
             self.assertEqual(result.returncode, 1)  # 缺 license + gitignore → warn
 
             write(root, "LICENSE", "MIT\n")
             write(root, ".gitignore", "x\n")
-            result = subprocess.run([sys.executable, str(SCRIPT), str(root)], capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(SCRIPT), str(root)], capture_output=True, text=True, encoding="utf-8", errors="replace")
             self.assertEqual(result.returncode, 0)
 
 

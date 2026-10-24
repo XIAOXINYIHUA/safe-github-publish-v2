@@ -26,6 +26,12 @@ GIT_C = re.compile(r"(?im)\bgit\s+-C\s+(\"[^\"]+\"|\S+)")
 
 
 def main() -> int:
+    # 英文 locale 的 Windows 管道默认 cp1252，输出中文会 UnicodeEncodeError
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass
     try:
         event = json.load(sys.stdin)
     except (ValueError, OSError):
