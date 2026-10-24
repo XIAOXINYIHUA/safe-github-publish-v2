@@ -1,0 +1,4 @@
+interface:
+  display_name: "Safe GitHub Publish"
+  short_description: "Phase-gated secure GitHub publishing: secret & history scanning, polished README and release format"
+  default_prompt: "Use $safe-github-publish to scan this project for secrets and privacy risks, fix the publish set, format README/CHANGELOG/repo metadata, and publish to GitHub safely."

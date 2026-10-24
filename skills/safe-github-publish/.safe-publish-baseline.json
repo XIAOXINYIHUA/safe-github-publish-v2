@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "entries": [
+    {"rule": "credential-assignment", "path": "tests/test_security_scan.py", "line": null, "reason": "合成测试夹具：故意植入的假密钥形态，用于验证扫描器规则命中，非真实凭据", "date": "2026-10-24"},
+    {"rule": "high-entropy-secret", "path": "tests/test_security_scan.py", "line": null, "reason": "合成测试夹具：随机字符串，非真实凭据", "date": "2026-10-24"},
+    {"rule": "internal-ip", "path": "tests/test_security_scan.py", "line": null, "reason": "合成测试夹具：虚构内网 IP", "date": "2026-10-24"},
+    {"rule": "email-address", "path": "tests/test_security_scan.py", "line": null, "reason": "合成测试夹具：example.com 保留域邮箱", "date": "2026-10-24"}
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "process",
+            "command": "bash",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/push_guard.sh"],
+            "timeoutMs": 120000,
+            "statusMessage": "safe-github-publish: 發佈前安全檢查中"
+          }
+        ]
+      }
+    ]
+  }
+}
