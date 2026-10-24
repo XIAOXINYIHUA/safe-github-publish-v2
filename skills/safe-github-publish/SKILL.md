@@ -91,7 +91,7 @@ description: 安全自动化发布项目到 GitHub：分阶段门禁式审查密
 
 - 核对远程 URL、可见性、默认分支、推送结果、description 与 topics 生效。
 - 确认工作区无意外 staged 文件；对 public 仓库浏览远程文件列表复检敏感项。
-- **防复发**：向用户提供 `assets/` 三件套（gitleaks 配置、pre-commit、CI 扫描 workflow），发生过泄露的项目必须提供。
+- **防复发（默认部署）**：发布完成后直接把 `assets/` 模板装进用户项目——gitleaks CI workflow（`.github/workflows/gitleaks.yml`）与 `.gitleaks.toml` 默认部署；pre-commit 钩子询问用户是否启用；发生过泄露的项目三件套全配。部署后在报告中说明，不静默添加。
 - 报告已检查范围与未覆盖风险（历史、二进制、外部系统），不宣称"完全安全"。
 
 ## 输出格式

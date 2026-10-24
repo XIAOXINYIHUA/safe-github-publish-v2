@@ -65,7 +65,7 @@
 
 ## 防复发三件套
 
-发布完成后向用户提供持续防线（复制 `assets/` 模板进用户项目）：
+发布完成后默认部署持续防线（复制 `assets/` 模板进用户项目；pre-commit 需询问，其余默认）：
 
 1. `.gitleaks.toml` —— 扩展 gitleaks 内置规则并接入基线豁免
 2. `.pre-commit-config.yaml` —— 提交前本地自动扫描
