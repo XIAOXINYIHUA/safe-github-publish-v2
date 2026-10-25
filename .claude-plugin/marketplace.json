@@ -1,0 +1,12 @@
+{
+  "name": "safe-github-publish",
+  "description": "Secure GitHub publishing skill and push guard for coding agents",
+  "owner": { "name": "XIAOXINYIHUA" },
+  "plugins": [
+    {
+      "name": "safe-github-publish",
+      "source": "./",
+      "description": "Phase-gated secure GitHub publishing with a PreToolUse guard that blocks risky pushes"
+    }
+  ]
+}
