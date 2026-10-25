@@ -1,15 +1,15 @@
 # pre-commit 配置 —— 复制到用户仓库根目录（文件名 .pre-commit-config.yaml）
 # 启用：pip install pre-commit && pre-commit install
-# rev 请对齐官方最新 release
+# rev 为编写时的最新 release；部署时可用 pre-commit autoupdate 跟进
 
 repos:
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.24.3
+    rev: v8.30.1
     hooks:
       - id: gitleaks
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: detect-private-key
       - id: check-merge-conflict

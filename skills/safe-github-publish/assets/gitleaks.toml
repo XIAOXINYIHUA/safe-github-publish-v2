@@ -1,12 +1,14 @@
 # gitleaks 基础配置 —— 复制到用户仓库根目录（文件名 .gitleaks.toml）
-# 作用：在 gitleaks 内置规则之上，接入本 skill 的人工审核基线文件
+# 在 gitleaks 内置规则之上追加经人工复核的豁免。
+# 注意：gitleaks 不读取 .safe-publish-baseline.json。基线里确认过的误报要在下方 allowlist 同步，
+# 否则本地扫描放行、CI 仍会报警；同样不要为通过扫描而放行真实密钥。
 
 [extend]
 useDefault = true
 
-# 经人工复核的豁免项。patternTarget/path 按需追加，不要为通过扫描而放行真实密钥
 [[allowlists]]
-description = "reviewed false positives (safe-publish baseline)"
+description = "reviewed false positives (mirror of .safe-publish-baseline.json)"
 paths = [
-  '''(^|/)\.safe-publish-baseline\.json$''',
+  '''(^|/)\.safe-publish-baseline\.json$''',  # 基线文件本身只含规则名、路径与理由
+  # '''^tests/fixtures/''',                   # 示例：基线中整文件豁免的测试夹具
 ]
