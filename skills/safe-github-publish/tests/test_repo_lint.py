@@ -150,6 +150,18 @@ class RepoLintTests(unittest.TestCase):
             findings = repo_lint.lint(root)
             self.assertNotIn("link-resolves", {f["check"] for f in findings})
 
+    def test_dot_slash_prefixed_links_in_root_readme_resolve(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write(root, "LICENSE", "MIT\n")
+            write(root, ".gitignore", "x\n")
+            write(root, "README.md", "# Demo\n\n## Quick start\n\n![面板](./images/Dashboard.jpg) 见 [LICENSE](./LICENSE)。\n")
+            write(root, "images/Dashboard.jpg", "\xff\xd8\xff\xe0")
+            findings = repo_lint.lint(root)
+            # ./ 前缀未被归一化时会被误判为 link-ignored / link-resolves
+            self.assertNotIn("link-ignored", {f["check"] for f in findings})
+            self.assertNotIn("link-resolves", {f["check"] for f in findings})
+
     def test_empty_section_is_warning(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

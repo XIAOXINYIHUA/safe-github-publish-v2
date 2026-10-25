@@ -167,8 +167,8 @@ def check_readme(root: Path, readme: Path, index: dict[str, set[str]], findings:
         if decoded in link_cache:
             continue
         link_cache[decoded] = None
-        # ../ 相对链接按 README 所在目录归一化到仓库根再匹配
-        decoded = posixpath.normpath(posixpath.join(readme_dir, decoded)) if readme_dir != "." else decoded
+        # 相对链接（含 ./ 与 ../ 前缀）按 README 所在目录归一化到仓库根再匹配
+        decoded = posixpath.normpath(posixpath.join(readme_dir, decoded))
         candidates = index.get(decoded.lower())
         if decoded == ".." or decoded.startswith("../"):
             # 指向检查根目录之外（如只检查子目录时链接仓库根的 LICENSE）：只能确认存在
