@@ -2,14 +2,13 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
-            "type": "process",
-            "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/push_guard.sh"],
-            "timeoutMs": 120000,
-            "statusMessage": "safe-github-publish: 發佈前安全檢查中"
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/push_guard.sh\"",
+            "timeout": 120,
+            "statusMessage": "safe-github-publish：发布前安全检查中"
           }
         ]
       }
