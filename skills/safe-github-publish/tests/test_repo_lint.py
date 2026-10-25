@@ -186,6 +186,38 @@ class RepoLintTests(unittest.TestCase):
             self.assertIn("readme-title", checks)
             self.assertIn("readme-badges", checks)
 
+    def test_percent_encoded_reference_and_html_links_resolve(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            readme = GOOD_README + (
+                "\n[使用说明](guide/%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md)\n"
+                "\n见 [架构][arch] 与脚注[^1]。\n\n[arch]: guide/Arch.md\n[^1]: 这是脚注，不是链接\n"
+                '\n<img src="guide/logo.png" width="64">\n'
+            )
+            write(root, "README.md", readme)
+            write(root, "LICENSE", "MIT\n")
+            write(root, ".gitignore", "x\n")
+            write(root, "Docs/screen.png", "x")
+            write(root, "guide/使用说明.md", "x")
+            write(root, "guide/arch.md", "x")
+            messages = [f["message"] for f in repo_lint.lint(root) if f["severity"] == "error"]
+            # 中文百分号编码与脚注不误报；引用式链接与 HTML 标签同样检查
+            self.assertEqual(len(messages), 2, messages)
+            self.assertTrue(any("guide/Arch.md" in m and "大小写" in m for m in messages))
+            self.assertTrue(any("guide/logo.png" in m for m in messages))
+
+    def test_link_to_gitignored_file_is_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            subprocess.run(["git", "-C", str(root), "init", "-q"], check=True, capture_output=True)
+            write(root, "README.md", GOOD_README + "\n内部笔记见 [notes](notes/plan.md)。\n")
+            write(root, "LICENSE", "MIT\n")
+            write(root, ".gitignore", "notes/\n")
+            write(root, "Docs/screen.png", "x")
+            write(root, "notes/plan.md", "x")
+            checks = {(f["check"], f["severity"]) for f in repo_lint.lint(root)}
+            self.assertIn(("link-ignored", "error"), checks)
+
     def test_exit_codes(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

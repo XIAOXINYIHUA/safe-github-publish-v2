@@ -12,8 +12,10 @@ import json
 import os
 import posixpath
 import re
+import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 VERSION = "2.0.0"
 
@@ -29,27 +31,53 @@ MERMAID_KEYWORDS = re.compile(
 )
 LINK_PATTERN = re.compile(r"(?<!\!)\[[^\]]*\]\(([^)\s]+)[^)]*\)")
 IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\(([^)\s]+)[^)]*\)")
+REFERENCE_PATTERN = re.compile(r"(?m)^ {0,3}\[(?!\^)[^\]]+\]:\s*<?([^\s>]+)>?")  # [^1]: 是脚注不是链接
+HTML_LINK_PATTERN = re.compile(r"""(?i)<(?:a|img|source|video)\b[^>]*?\b(?:href|src)\s*=\s*["']([^"'\s]+)""")
 MAX_BADGES = 6
-EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "tel:")
+EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "tel:", "data:", "//")
 
 
-def walk_repo(root: Path) -> dict[str, set[str]]:
-    """返回 {小写相对路径 -> 同路径下的实际文件/目录名集合}，用于大小写敏感匹配。"""
+def git_files(root: Path) -> list[str] | None:
+    """tracked + 未忽略的 untracked 文件，即会被推送的候选集；非 git 仓库返回 None。"""
+    try:
+        proc = subprocess.run(["git", "-C", str(root), "ls-files", "-co", "--exclude-standard", "-z"],
+                              capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return [item for item in proc.stdout.decode("utf-8", errors="surrogateescape").split("\0") if item]
+
+
+def walk_repo(root: Path) -> tuple[dict[str, set[str]], bool]:
+    """返回 ({小写相对路径 -> 实际路径集合}, 是否来自 git 候选集)，用于大小写敏感匹配。
+
+    git 仓库里只收录会被推送的文件：链接指向被 .gitignore 忽略的文件，本地能打开，GitHub 上是坏链。
+    """
     index: dict[str, set[str]] = {}
-    for current, dirs, files in os.walk(root):
+
+    def add(rel: str) -> None:
+        index.setdefault(rel.lower(), set()).add(rel)
+        parent = posixpath.dirname(rel)
+        while parent:
+            index.setdefault(parent.lower(), set()).add(parent)
+            parent = posixpath.dirname(parent)
+
+    files = git_files(root)
+    if files is not None:
+        for rel in files:
+            add(rel)
+        return index, True
+    for current, dirs, names in os.walk(root):
         if ".git" in dirs:
             dirs.remove(".git")
         base = Path(current)
-        for entry in dirs + files:
+        for entry in dirs + names:
             try:
-                rel = (base / entry).relative_to(root).as_posix()
+                add((base / entry).relative_to(root).as_posix())
             except ValueError:
                 continue
-            index.setdefault(rel.lower(), set()).add(rel)
-            parent = str(Path(rel).parent.as_posix())
-            if parent != ".":
-                index.setdefault(parent.lower(), set()).add(parent)
-    return index
+    return index, False
 
 
 def split_fences(text: str) -> list[tuple[str, bool]]:
@@ -66,7 +94,8 @@ def split_fences(text: str) -> list[tuple[str, bool]]:
     return result
 
 
-def check_readme(root: Path, readme: Path, index: dict[str, set[str]], findings: list[dict]) -> None:
+def check_readme(root: Path, readme: Path, index: dict[str, set[str]], findings: list[dict],
+                 from_git: bool = False) -> None:
     try:
         readme_dir = readme.parent.relative_to(root).as_posix()
     except ValueError:
@@ -125,21 +154,30 @@ def check_readme(root: Path, readme: Path, index: dict[str, set[str]], findings:
     # 链接检查只针对围栏外的正文，避免检查代码示例中的链接
     unfenced_text = "\n".join(line for line, fenced in lines if not fenced)
     link_cache: dict[str, None] = {}
-    for match in list(LINK_PATTERN.finditer(unfenced_text)) + list(IMAGE_PATTERN.finditer(unfenced_text)):
+    patterns = (LINK_PATTERN, IMAGE_PATTERN, REFERENCE_PATTERN, HTML_LINK_PATTERN)
+    for match in [m for pattern in patterns for m in pattern.finditer(unfenced_text)]:
         target = match.group(1)
-        if target.startswith(EXTERNAL_PREFIXES) or target.startswith("#") or target.startswith("<"):
+        if target.lower().startswith(EXTERNAL_PREFIXES) or target.startswith(("#", "<")):
             continue
         target = target.split("#")[0].split("?")[0]
         if not target:
             continue
-        decoded = target.replace("%20", " ").rstrip("/")
+        # 中文文件名在链接里通常是百分号编码：docs/%E4%BD%BF%E7%94%A8.md
+        decoded = unquote(target).rstrip("/")
         if decoded in link_cache:
             continue
         link_cache[decoded] = None
         # ../ 相对链接按 README 所在目录归一化到仓库根再匹配
         decoded = posixpath.normpath(posixpath.join(readme_dir, decoded)) if readme_dir != "." else decoded
         candidates = index.get(decoded.lower())
-        if not candidates:
+        if decoded == ".." or decoded.startswith("../"):
+            # 指向检查根目录之外（如只检查子目录时链接仓库根的 LICENSE）：只能确认存在
+            if not (root / decoded).exists():
+                findings.append({"severity": "error", "check": "link-resolves", "message": f"相对链接目标不存在: {decoded}"})
+            continue
+        if not candidates and from_git and (root / decoded).exists():
+            findings.append({"severity": "error", "check": "link-ignored", "message": f"链接目标被 .gitignore 忽略，推送后失效: {decoded}"})
+        elif not candidates:
             findings.append({"severity": "error", "check": "link-resolves", "message": f"相对链接目标不存在: {decoded}"})
         elif decoded not in candidates:
             actual = next(iter(candidates))
@@ -173,7 +211,7 @@ def check_readme(root: Path, readme: Path, index: dict[str, set[str]], findings:
 
 def lint(root: Path) -> list[dict]:
     findings: list[dict] = []
-    index = walk_repo(root)
+    index, from_git = walk_repo(root)
     names = {entry.name for entry in root.iterdir()}
 
     readme = next((root / name for name in README_NAMES if (root / name).is_file()), None)
@@ -185,7 +223,7 @@ def lint(root: Path) -> list[dict]:
         else:
             findings.append({"severity": "error", "check": "readme-exists", "message": "缺少 README.md"})
     if readme is not None and readme.is_file():
-        check_readme(root, readme, index, findings)
+        check_readme(root, readme, index, findings, from_git)
 
     if not any(LICENSE_NAMES.match(n) for n in names):
         findings.append({"severity": "warn", "check": "license-exists", "message": "缺少 LICENSE 文件；发布前应让用户选择许可证"})
