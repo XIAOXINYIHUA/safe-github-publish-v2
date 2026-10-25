@@ -6,11 +6,11 @@
 
 - **阶段门禁工作流**：侦察 → 圈定候选集 → 安全扫描 → 修复脱敏 → 发布格式 → 暂存提交 → 推送 → 验证，8 个阶段 4 道硬门禁，上一关不过不放行
 - **深度扫描**：工作区 + `--scan-history`（全部 Git 历史，连已删除文件里的密钥也能抓到）+ `--staged`（staged diff）+ `--unpushed`（仅未推送提交）四重模式，支持 gitleaks/trufflehog 已安装时优先使用
-- **主动防线**：以 plugin 安装时自带 PreToolUse 守衛——任何 `git push` / `gh repo create` / `gh release create|upload` 前自动扫描未推送提交，high 阻断（连"先提交密钥再 revert"也拦得住，因为密钥仍在未推送历史里）
+- **主动防线**：以 plugin 安装时自带 PreToolUse 守卫——`git push`、`gh repo create`、转公开、`gh release create|upload`、`gh pr create` 前自动扫描待发布提交，high 阻断（连"先提交密钥再 revert"也拦得住，因为密钥仍在未推送历史里）；推到新 remote 或转公开时扫全部历史，扫描异常时同样阻断
 - **绝不泄值**：输出只含相对路径、行号、规则名与 commit 摘要，测试明确断言不泄露命中值与根目录
 - **误报基线**：`.safe-publish-baseline.json` 记录人工审核过的豁免项（含 reason 与日期），不为通过门禁而自动填充
 - **格式工整**：`repo_lint.py` 校验 README 结构、快速开始章节、相对链接大小写（GitHub 区分大小写）、Mermaid 图表类型、空章节与 badge 数量
-- **洩露应急**：内置手册——先轮换密钥、再评估暴露面、经确认才清理历史，拒绝"清了历史就没事"的错误方案
+- **泄露应急**：内置手册——先轮换密钥、再评估暴露面、经确认才清理历史，拒绝"清了历史就没事"的错误方案
 
 ## Quick start
 
@@ -34,8 +34,8 @@ Summary: error=1 warn=2 info=1
 
 安装两种形态任选：
 
-- **仅 skill**：把 `skills/safe-github-publish/` 复制到 `~/.agents/skills/`（或项目内 `.zcode/skills/`）
-- **完整 plugin（推荐，含 push 守衛）**：通过本地 marketplace 安装（见仓库根的 `.zcode-plugin/plugin.json` 与 `hooks/`）
+- **仅 skill**：把 `skills/safe-github-publish/` 复制到 `~/.agents/skills/`、`~/.claude/skills/`（Claude Code）或项目内 `.zcode/skills/`
+- **完整 plugin（推荐，含 push 守卫）**：Claude Code 运行 `/plugin marketplace add XIAOXINYIHUA/safe-github-publish-v2` 后 `/plugin install safe-github-publish@safe-github-publish`；ZCode 在 Plugin Marketplace 添加本仓库（清单分别在仓库根的 `.claude-plugin/` 与 `.zcode-plugin/`）
 
 ## How it works
 
@@ -56,7 +56,7 @@ flowchart LR
     G4 --> V[Phase 7 发布后验证]
 ```
 
-目录结构：`SKILL.md` 是路由与工作流；`scripts/` 是两个可独立运行的确定性门禁脚本；`references/` 是按需加载的四份手册（隐私清单 / README 模板 / 发布格式 / 洩露应急）；`assets/` 是防复发三件套模板（gitleaks 配置、pre-commit、CI 扫描）。
+目录结构：`SKILL.md` 是路由与工作流；`scripts/` 是两个可独立运行的确定性门禁脚本；`references/` 是按需加载的四份手册（隐私清单 / README 模板 / 发布格式 / 泄露应急）；`assets/` 是防复发三件套模板（gitleaks 配置、pre-commit、CI 扫描）。
 
 ## 安全边界
 
@@ -68,10 +68,10 @@ flowchart LR
 ## Development
 
 ```bash
-python -m unittest discover -s tests -v   # 25 个测试：规则命中、历史/staged/unpushed 扫描、基线、输出安全、格式检查
+python -m unittest discover -s tests -v   # 45 个测试：规则命中、历史/staged/unpushed 扫描、基线、输出安全、格式检查、push 守卫
 ```
 
-CI（Ubuntu + Windows × Python 3.11/3.13）见仓库根 `.github/workflows/tests.yml`；密钥扫描模板见 `assets/ci-gitleaks.yml`。
+单独复制本目录时找不到仓库根的 `hooks/`，9 个守卫测试自动跳过。CI（Ubuntu / Windows / macOS × Python 3.11/3.13，另跑 ruff）见仓库根 `.github/workflows/tests.yml`；密钥扫描模板见 `assets/ci-gitleaks.yml`。
 
 ## License
 

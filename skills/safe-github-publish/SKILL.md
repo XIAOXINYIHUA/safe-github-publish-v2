@@ -22,7 +22,7 @@ description: 安全自动化发布项目到 GitHub：分阶段门禁式审查密
 
 | 需要 | 用什么 |
 |---|---|
-| 隐私/密钥扫描（含 Git 历史） | `python3 scripts/security_scan.py <root> [--json] [--scan-history] [--staged] [--baseline <file>]`（Windows 用 `py -3`） |
+| 隐私/密钥扫描（含 Git 历史） | `python3 scripts/security_scan.py <root> [--json] [--scan-history] [--staged] [--unpushed [--remote <name>]] [--baseline <file>]`（Windows 用 `py -3`） |
 | 发布格式检查（README/LICENSE/链接/图表） | `python3 scripts/repo_lint.py <root> [--json]`（Windows 用 `py -3`） |
 | 人工复核隐私风险时 | 读 [references/privacy-checklist.md](references/privacy-checklist.md) |
 | 生成或重写 README 时 | 读 [references/readme-template.md](references/readme-template.md) |
@@ -85,6 +85,7 @@ description: 安全自动化发布项目到 GitHub：分阶段门禁式审查密
 - `origin` 已存在时先核对 host/owner/repo，不匹配则询问，不覆盖。
 - 推送当前分支；不用 `--force` / `--force-with-lease`，除非用户批准了明确的历史修复方案。
 - 推送后用 `gh repo edit --description --add-topic` 等设置元数据；需要发版时按 release-format 打 tag 并 `gh release create`。
+- 以 plugin 安装时，push 守卫会在推送、转公开、发版与建 PR 前自动复扫：被 exit 2 阻断就回到 Phase 3 处置，不改写命令绕过；基线文件有改动时会弹出确认，向用户说明新增条目。
 - 网络/认证/命名冲突/权限失败：保留本地修改，简洁报告阻塞原因。
 
 ### Phase 7 · 发布后验证

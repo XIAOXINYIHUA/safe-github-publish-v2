@@ -1,6 +1,6 @@
 # Safe GitHub Publish
 
-为 ZCode / Claude Code 类 agent 准备的安全发布套装：skill 以阶段门禁完成密钥与隐私审查、生成工整的发布产物；PreToolUse 守衛在任何推送前做最后拦截。
+为 ZCode / Claude Code 类 agent 准备的安全发布套装：skill 以阶段门禁完成密钥与隐私审查、生成工整的发布产物；PreToolUse 守卫在任何推送前做最后拦截。
 
 [![tests](https://github.com/XIAOXINYIHUA/safe-github-publish-v2/actions/workflows/tests.yml/badge.svg)](https://github.com/XIAOXINYIHUA/safe-github-publish-v2/actions/workflows/tests.yml)
 ![version](https://img.shields.io/badge/release-v2.0.0-blue)
@@ -11,8 +11,8 @@
 
 - **阶段门禁工作流**：8 阶段 4 硬门禁（安全扫描 → 格式检查 → 复扫 → public 专项确认），退出码 2 不可绕过
 - **四模式扫描**：工作区 / 全部 Git 历史（含已删除文件中的密钥）/ staged / 未推送提交
-- **push 守衛**：拦截 `git push` 与 `gh` 发布命令；密钥提交后再 revert 依旧可拦——密钥仍在未推送历史中
-- **误报基线**：人工审核的豁免项记录 rule / path / reason / 日期，禁止自动填充
+- **push 守卫**：拦截 `git push`、转公开（`gh repo edit --visibility public`、`gh api`）与 `gh` 建仓、发版、建 PR；按目标 remote 计算未推送范围，推到新 remote 或转公开时扫全部历史；Bash 与 PowerShell 均可，跟踪 `cd` 与 `git -C`；扫描异常时阻断
+- **误报基线**：人工审核的豁免项记录 rule / path / reason / 日期，禁止自动填充；推送中改了基线会请求确认
 - **格式门禁**：README 结构、相对链接大小写（GitHub 区分大小写）、Mermaid 校验、空章节与 badge 上限
 - **发布产物**：README 模板、Conventional Commits、语义化标签、Keep a Changelog、topics 与许可证对照
 
@@ -24,20 +24,27 @@
 flowchart LR
     A[skill 工作流<br>8 阶段 4 门禁] --> R{扫描器}
     R -- "high 未处置" --> X[阻断 exit 2]
-    R -- 通过 --> G[push 守衛<br>PreToolUse hook]
-    G -- "未推送提交含密钥" --> X
+    R -- 通过 --> G[push 守卫<br>PreToolUse hook]
+    G -- "待发布提交含密钥" --> X
     G -- 通过 --> P((GitHub))
 ```
 
 ## 安装
 
-**plugin（推荐，含 push 守衛）**：Plugin Marketplace → Add，添加本仓库，安装 `safe-github-publish`。
+**Claude Code（plugin，含 push 守卫）**：
 
-**仅 skill**：
+```text
+/plugin marketplace add XIAOXINYIHUA/safe-github-publish-v2
+/plugin install safe-github-publish@safe-github-publish
+```
+
+**ZCode（plugin，含 push 守卫）**：Plugin Marketplace → Add，添加本仓库，安装 `safe-github-publish`。
+
+**仅 skill**（不含守卫）：
 
 ```bash
 git clone https://github.com/XIAOXINYIHUA/safe-github-publish-v2.git
-cp -r safe-github-publish-v2/skills/safe-github-publish ~/.agents/skills/
+cp -r safe-github-publish-v2/skills/safe-github-publish ~/.agents/skills/   # Claude Code 用 ~/.claude/skills/
 ```
 
 ## 使用
@@ -64,37 +71,39 @@ Summary: error=1 warn=2 info=1
 |---|---|---|
 | 工作流 | 线性 8 步清单 | 8 阶段 4 硬门禁 |
 | Git 历史扫描 | 不支持 | `--scan-history` / `--unpushed` |
-| 提交前防线 | 无 | `--staged` + push 守衛 hook |
+| 提交前防线 | 无 | `--staged` + push 守卫 hook |
 | 误报处置 | 人工忽略 | 审核基线（reason + 日期） |
 | 发布格式 | 仅 README 模板 | repo_lint 确定性门禁 + 格式规范 |
-| 测试 | 8 个 | 27 个 + CI 四矩阵 |
+| 测试 | 8 个 | 45 个 + CI 六矩阵 + ruff |
 
 ## 目录结构
 
 ```text
 safe-github-publish/
-├── .zcode-plugin/plugin.json      # plugin 清单（skill + hooks）
-├── .github/workflows/tests.yml    # CI：Ubuntu / Windows × Python 3.11 / 3.13
-├── hooks/                         # push 守衛（PreToolUse）
+├── .zcode-plugin/plugin.json      # ZCode plugin 清单（skill + hooks）
+├── .claude-plugin/                # Claude Code plugin 清单与 marketplace
+├── .github/workflows/tests.yml    # CI：Ubuntu / Windows / macOS × Python 3.11 / 3.13 + ruff
+├── hooks/                         # push 守卫（PreToolUse）
 └── skills/safe-github-publish/
     ├── SKILL.md                   # 工作流核心：8 阶段 4 门禁
     ├── scripts/                   # security_scan.py / repo_lint.py
-    ├── references/                # 隐私清单、README 模板、发布格式、洩露应急
+    ├── references/                # 隐私清单、README 模板、发布格式、泄露应急
     ├── assets/                    # 防复发：gitleaks / pre-commit / CI 模板
-    └── tests/                     # 27 个单元测试
+    └── tests/                     # 45 个单元测试
 ```
 
 ## 安全边界
 
-覆盖：tracked 与未忽略的 untracked 文件、历史 / staged / 未推送提交的新增行、JPEG 与 PNG 的 EXIF 存在性、符号链接与嵌套仓库。
+覆盖：tracked 与未忽略的 untracked 文件、历史 / staged / 未推送提交的新增行、JPEG 与 PNG 的 EXIF 存在性、符号链接与嵌套仓库；守卫覆盖 agent 直接发出的 Bash / PowerShell 命令，含 `bash -c`、`pwsh -Command` 与 `eval` 嵌套。
 
-不覆盖：二进制与压缩包内部、Git LFS 对象、远程系统；历史扫描超过 200MB 会截断并如实提示，不静默跳过。不宣称"完全安全"，只报告已检查范围与剩余风险。
+不覆盖：二进制与压缩包内部、Git LFS 对象、远程系统；历史扫描超过 200MB 会截断并如实提示，不静默跳过。守卫不解析脚本文件内部的推送（如 `./deploy.sh`）、git 别名与变量拼接等混淆写法，也拦不到网页端与 GUI 客户端操作——这些由 gitleaks CI 兜底。不宣称"完全安全"，只报告已检查范围与剩余风险。
 
 ## 开发
 
 ```bash
 python -m unittest discover -s skills/safe-github-publish/tests -v
-echo '{"tool_name":"Bash","tool_input":{"command":"git push"}}' | bash hooks/push_guard.sh
+ruff check .
+echo '{"tool_name":"Bash","tool_input":{"command":"git push"},"cwd":"."}' | bash hooks/push_guard.sh
 ```
 
 详细文档：[skills/safe-github-publish/README.md](skills/safe-github-publish/README.md) · 变更记录：[CHANGELOG.md](CHANGELOG.md)
