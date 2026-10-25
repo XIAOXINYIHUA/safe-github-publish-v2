@@ -1,7 +1,7 @@
 {
   "name": "safe-github-publish",
   "displayName": "Safe GitHub Publish",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Phase-gated secure GitHub publishing: secret & history scanning, polished README and release format, plus a PreToolUse guard that blocks risky pushes",
   "author": { "name": "XIAOXINYIHUA" },
   "repository": "https://github.com/XIAOXINYIHUA/safe-github-publish-v2",

@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from urllib.parse import unquote
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 README_NAMES = ["README.md", "readme.md", "Readme.md"]
 LICENSE_NAMES = re.compile(r"(?i)^licen[cs]e(\.|$|^)|(?:copying|notice)(?:\.|$)")

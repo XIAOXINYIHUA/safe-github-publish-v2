@@ -3,7 +3,7 @@
 为 ZCode / Claude Code 类 agent 准备的安全发布套装：skill 以阶段门禁完成密钥与隐私审查、生成工整的发布产物；PreToolUse 守卫在任何推送前做最后拦截。
 
 [![tests](https://github.com/XIAOXINYIHUA/safe-github-publish-v2/actions/workflows/tests.yml/badge.svg)](https://github.com/XIAOXINYIHUA/safe-github-publish-v2/actions/workflows/tests.yml)
-![version](https://img.shields.io/badge/release-v2.0.0-blue)
+![version](https://img.shields.io/badge/release-v2.1.0-blue)
 ![python](https://img.shields.io/badge/python-3.11%20%7C%203.13-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
