@@ -7,7 +7,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "security_scan.py"
 SPEC = importlib.util.spec_from_file_location("security_scan", SCRIPT)
@@ -51,6 +50,59 @@ class WorktreeScanTests(unittest.TestCase):
                     "telegram-bot-token", "credential-assignment",
                 }.issubset(rules)
             )
+
+    def test_prefixed_env_and_quoted_keys_are_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            value = "Zq8" + "vN3pL7wR2tY6"
+            samples = {
+                "config.json": '{"api_key": "' + value + '"}',
+                "settings.ini": "OPENAI_API_KEY=" + value,
+                "docker-compose.yml": "services:\n  db:\n    environment:\n      - MYSQL_ROOT_PASSWORD=" + value,
+                "aws.py": 'AWS_SECRET_ACCESS_KEY = "' + value * 2 + '"',
+                "db.php": "'password' => '" + value + "'",
+                # 前面的界面文案被跳过后，同一行后面的真实值仍要命中
+                "minified.json": '{"password": "Enter your password", "api_key": "' + value + '"}',
+            }
+            for name, content in samples.items():
+                (root / name).write_text(content + "\n", encoding="utf-8")
+            hits = {(i["path"], i["rule"], i["severity"]) for i in security_scan.scan(root)["findings"]}
+            for name in samples:
+                self.assertIn((name, "credential-assignment", "high"), hits, name)
+
+    def test_code_expressions_placeholders_and_prose_are_not_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            lines = [
+                'api_key = os.getenv("API_KEY")',
+                'password = os.environ["DB_PASSWORD"]',
+                'password = os.environ.get("DB_PASSWORD", "")',
+                "    password: Optional[str] = None",
+                "  password: process.env.DB_PASSWORD,",
+                "  apiKey: process.env.API_KEY!,",
+                'password = request.form["password"]',
+                "PASSWORD=$DB_PASSWORD",
+                '"password": "Enter your password",',
+                '"forgot_password": "忘记密码了吗请点击这里",',
+                "DATABASE_URL=postgres://app:${DB_PASS}@db:5432/app",
+                'SECRET = "github_" + "pat_" + "R" * 32',
+            ]
+            (root / "app.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            self.assertEqual(security_scan.scan(root)["findings"], [])
+
+    def test_unquoted_values_in_source_code_are_references(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "client.py").write_text(
+                "payload = {'password': password, 'secretKey': secret_key}\n"
+                "connect(admin_api_key=admin_api_key, webhook_secret=webhook_secret)\n"
+                'normalized_password = u"".join(chars)\n'
+                'OPENAI_API_KEY = "sk-proj-..."\n',
+                encoding="utf-8")
+            # 带前缀的字符串字面量仍是字面量
+            (root / "literal.py").write_text('DB_PASSWORD = b"' + "Zq8" + "vN3pL7wR2tY6" + '"\n', encoding="utf-8")
+            hits = {(i["path"], i["rule"]) for i in security_scan.scan(root)["findings"]}
+            self.assertEqual(hits, {("literal.py", "credential-assignment")})
 
     def test_sensitive_file_names_are_classified(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -147,6 +199,36 @@ class HistoryScanTests(unittest.TestCase):
             result_no_history = security_scan.scan(root, scan_history_flag=False)
             self.assertFalse(result_no_history["history_scanned"])
 
+    def test_secret_in_removed_non_ascii_file_history_is_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            git(root, "init", "-q")
+            git(root, "config", "user.email", "t@example.com")
+            git(root, "config", "user.name", "t")
+            (root / "配置.py").write_text("github_" + "pat_" + "C" * 32 + "\n", encoding="utf-8")
+            git(root, "add", "配置.py")
+            git(root, "commit", "-q", "-m", "add secret")
+            (root / "配置.py").unlink()
+            git(root, "add", "-A")
+            git(root, "commit", "-q", "-m", "remove file")
+
+            result = security_scan.scan(root, scan_history_flag=True)
+            history_paths = {i["path"] for i in result["findings"] if i.get("scope") == "history"}
+            self.assertEqual(history_paths, {"配置.py"})
+
+    def test_quoted_diff_path_is_decoded(self) -> None:
+        # 路径含引号/反斜杠时即使 quotePath=false，git 仍输出 C 风格转义
+        lines = [
+            "commit 0123456789abcdef",
+            "--- /dev/null",
+            '+++ "b/\\"\\351\\205\\215\\347\\275\\256\\".md"',
+            "@@ -0,0 +1 @@",
+            "+" + "github_" + "pat_" + "E" * 32,
+        ]
+        findings = security_scan.Findings()
+        security_scan._scan_diff(iter(lines), findings, scope="history")
+        self.assertEqual([(i["path"], i["line"]) for i in findings.items], [('"配置".md', 1)])
+
     def test_staged_secret_is_detected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -163,6 +245,22 @@ class HistoryScanTests(unittest.TestCase):
             staged = [i for i in result["findings"] if i.get("scope") == "staged"]
             self.assertTrue(staged)
             self.assertEqual(staged[0]["path"], "cfg.ini")
+
+    def test_staged_secret_in_non_ascii_file_is_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            git(root, "init", "-q")
+            git(root, "config", "user.email", "t@example.com")
+            git(root, "config", "user.name", "t")
+            (root / "README.md").write_text("hello\n", encoding="utf-8")
+            git(root, "add", "README.md")
+            git(root, "commit", "-q", "-m", "init")
+            (root / "密钥.txt").write_text("github_" + "pat_" + "D" * 32 + "\n", encoding="utf-8")
+            git(root, "add", "密钥.txt")
+
+            result = security_scan.scan(root, staged_flag=True)
+            staged = [i["path"] for i in result["findings"] if i.get("scope") == "staged"]
+            self.assertEqual(staged, ["密钥.txt"])
 
 
 class UnpushedScanTests(unittest.TestCase):

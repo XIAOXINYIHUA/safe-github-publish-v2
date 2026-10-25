@@ -61,6 +61,7 @@ class ContentRule:
     pattern: re.Pattern[str]
     value_group: str | None = None
     strict: bool = False  # strict 规则在锁文件中仍然执行（前缀锚定的供应商格式）
+    literal_only: bool = False  # 只报字面量：跳过代码表达式与界面文案
 
 
 PLACEHOLDER_VALUE = re.compile(
@@ -69,9 +70,35 @@ PLACEHOLDER_VALUE = re.compile(
     r"replace[-_ ]?(?:me|this|with[-_ ]?.+)?|"
     r"example|sample|dummy|fake|test|changeme|change[-_ ]?me|"
     r"redacted|masked|placeholder|none|null|undefined|x{4,}|\*{4,}|"
-    r"<[^>]+>|\$\{[^}]+\}|%\([^)]+\)s"
+    r"<[^>]+>|\$\{[^}]+\}|\$[a-z_]\w*|%[a-z_]\w*%|%\([^)]+\)s|"
+    r".*(?:\.{3}|…).*"  # 文档里的省略示例：sk-proj-...
     r")$"
 )
+
+# 源代码里的字符串字面量必带引号，未加引号的值是变量或表达式（'password': password）；
+# 例外是带前缀的字面量 b"..." / f"..." 与模板字符串，正则会把它们归入未加引号分支
+SOURCE_SUFFIXES = {
+    ".py", ".pyx", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".vue", ".svelte",
+    ".go", ".java", ".kt", ".kts", ".scala", ".groovy", ".rb", ".php", ".cs", ".rs", ".swift",
+    ".dart", ".c", ".h", ".cc", ".cpp", ".hpp", ".m", ".lua",
+}
+PREFIXED_LITERAL = re.compile(r"[bBrRuUfF]{0,2}[\"'`][^\"'`]{8,}")
+
+# 未加引号的代码表达式读取的是运行时值而非字面量：
+# os.getenv("X")、os.environ["X"]、process.env.X!、Optional[str]、request.form["password"]
+CODE_EXPRESSION = re.compile(
+    r"""(?x)
+    [A-Za-z_$][\w$]{0,31}
+    (?: \??\.[A-Za-z_$][\w$]{0,31}               # 属性访问（含可选链 ?.）
+      | \( (?:"[^"]*"?|'[^']*'?|[\w$.]*) \)?     # 调用：参数可能被 , 截断而不闭合
+      | \[ (?:"[^"]*"?|'[^']*'?|[\w$.]*) \]?     # 下标
+    )*
+    !?
+    """
+)
+
+# 含空白或中日韩文字、且不含数字与 base64 符号的值是界面文案（"password": "Enter your password"）
+PROSE_VALUE = re.compile(r"(?=.*[\s\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af])[^\d+/=]+")
 
 CONTENT_RULES = [
     ContentRule("private-key-content", "high", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----"), strict=True),
@@ -92,12 +119,17 @@ CONTENT_RULES = [
         "credential-assignment",
         "high",
         re.compile(
-            r"(?ix)\b(?:api[_-]?key|api[_-]?secret|app[_-]?secret|access[_-]?key|access[_-]?token|"
-            r"auth[_-]?token|client[_-]?secret|secret|secret[_-]?key|password|passwd|"
-            r"db[_-]?password|database[_-]?password)\b\s*[:=]\s*"
-            r"(?P<value>\"[^\"\r\n]{8,}\"|'[^'\r\n]{8,}'|[^\s#;,]{8,})"
+            # 前缀段覆盖 OPENAI_API_KEY / MYSQL_ROOT_PASSWORD / AWS_SECRET_ACCESS_KEY；
+            # 键后可选引号覆盖 JSON 与 dict 键，赋值符含 := 与 =>
+            r"(?ix)\b(?:[a-z0-9]+[_-])*"
+            r"(?:api[_-]?key|api[_-]?secret|app[_-]?secret|access[_-]?key|access[_-]?token|"
+            r"auth[_-]?token|client[_-]?secret|secret|secret[_-]?key|password|passwd)\b"
+            r"[\"']?\s*(?::=|=>|[:=])\s*"
+            # 无引号分支不以引号开头，否则 "github_" 这类短字面量连引号凑够 8 位
+            r"(?P<value>\"[^\"\r\n]{8,}\"|'[^'\r\n]{8,}'|[^\s#;,\"'][^\s#;,]{7,})"
         ),
         "value",
+        literal_only=True,
     ),
     ContentRule(
         "authorization-header",
@@ -106,7 +138,7 @@ CONTENT_RULES = [
         "value",
     ),
     ContentRule("cloud-storage-key", "high", re.compile(r"(?i)\bAccountKey\s*=\s*(?P<value>[A-Za-z0-9+/=]{32,})"), "value", strict=True),
-    ContentRule("credential-url", "high", re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s:/]+:[^\s/@]+@")),
+    ContentRule("credential-url", "high", re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s:/]+:(?P<value>[^\s/@]+)@"), "value"),
     ContentRule("jwt-like-token", "medium", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")),
     ContentRule(
         "internal-ip",
@@ -122,7 +154,7 @@ CONTENT_RULES = [
 INTERNAL_IP_EXEMPT = re.compile(r"(?i)(?:^|/)(?:dockerfile[^/]*|docker-compose[^/]*\.ya?ml|compose\.ya?ml)$")
 
 HIGH_ENTROPY_ASSIGNMENT = re.compile(
-    r"(?ix)\b\w*(?:key|token|secret|password|passwd)\b\s*[:=]\s*[\"'](?P<value>[A-Za-z0-9+/=_-]{20,})[\"']"
+    r"(?ix)\b\w*(?:key|token|secret|password|passwd)\b[\"']?\s*[:=]\s*[\"'](?P<value>[A-Za-z0-9+/=_-]{20,})[\"']"
 )
 ENTROPY_THRESHOLD = 4.0
 
@@ -187,6 +219,15 @@ def is_placeholder(value: str) -> bool:
     return bool(PLACEHOLDER_VALUE.fullmatch(value.strip().strip("\"'")))
 
 
+def is_literal_secret(value: str, source_code: bool = False) -> bool:
+    if value[:1] not in "\"'":
+        if source_code and not PREFIXED_LITERAL.match(value):
+            return False
+        if CODE_EXPRESSION.fullmatch(value) and any(c in value for c in ".(["):
+            return False
+    return not PROSE_VALUE.fullmatch(value.strip("\"'"))
+
+
 def is_outside_root(path: Path, root: Path) -> bool:
     try:
         path.resolve(strict=False).relative_to(root.resolve())
@@ -231,17 +272,20 @@ def scan_text_line(line: str, rel: str, line_number: int | None, findings: Findi
                    commit: str | None = None, scope: str = "worktree",
                    lock_file: bool = False) -> None:
     exempt_ip = bool(INTERNAL_IP_EXEMPT.search(rel))
+    source_code = Path(rel).suffix.lower() in SOURCE_SUFFIXES
     for rule in CONTENT_RULES:
         if lock_file and not rule.strict:
             continue
         if rule.name == "internal-ip" and exempt_ip:
             continue
-        match = rule.pattern.search(line)
-        if not match:
-            continue
-        if rule.value_group and is_placeholder(match.group(rule.value_group)):
-            continue
-        findings.add(rule.severity, rule.name, rel, line_number, scope, commit)
+        # 逐个匹配：同一行前面的占位/文案不能掩盖后面的真实值
+        for match in rule.pattern.finditer(line):
+            if rule.value_group:
+                value = match.group(rule.value_group)
+                if is_placeholder(value) or (rule.literal_only and not is_literal_secret(value, source_code)):
+                    continue
+            findings.add(rule.severity, rule.name, rel, line_number, scope, commit)
+            break
     if not lock_file:
         entropy_match = HIGH_ENTROPY_ASSIGNMENT.search(line)
         if entropy_match:
@@ -301,6 +345,36 @@ def scan_worktree(root: Path, findings: Findings) -> None:
             scan_text_line(line, rel, line_number, findings, lock_file=lock_file)
 
 
+C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
+
+
+def unquote_c_style(value: str) -> str:
+    """还原 git 的 C 风格路径转义（\\ooo 八进制为 UTF-8 字节）。"""
+    out = bytearray()
+    i = 0
+    while i < len(value):
+        if value[i] == "\\" and i + 1 < len(value):
+            octal = value[i + 1:i + 4]
+            if len(octal) == 3 and all(c in "01234567" for c in octal):
+                out.append(int(octal, 8))
+                i += 4
+                continue
+            out.append(C_ESCAPES.get(value[i + 1], ord(value[i + 1]) & 0xFF))
+            i += 2
+            continue
+        out.extend(value[i].encode("utf-8"))
+        i += 1
+    return out.decode("utf-8", errors="replace")
+
+
+def diff_target_path(header: str) -> str:
+    """从 "+++ b/<path>" 取路径；路径含引号/反斜杠/控制字符时 git 仍会加引号转义。"""
+    target = header[4:].strip()
+    if len(target) >= 2 and target.startswith('"') and target.endswith('"'):
+        target = unquote_c_style(target[1:-1])
+    return target[2:]
+
+
 def _scan_diff(lines, findings: Findings, scope: str) -> None:
     rel: str | None = None
     line_number = 0
@@ -310,8 +384,8 @@ def _scan_diff(lines, findings: Findings, scope: str) -> None:
         if line.startswith("commit "):
             commit = line.split()[1][:10] if len(line.split()) > 1 else None
             rel, in_hunk = None, False
-        elif line.startswith("+++ b/"):
-            rel = line[6:].strip()
+        elif line.startswith("+++ b/") or line.startswith('+++ "b/'):
+            rel = diff_target_path(line)
             in_hunk = False
         elif line.startswith("@@ "):
             match = re.search(r"\+(\d+)(?:,(\d+))?", line)
@@ -332,24 +406,31 @@ def _scan_diff(lines, findings: Findings, scope: str) -> None:
 
 
 def run_git_bytes(root: Path, args: list[str]) -> "subprocess.Popen[bytes] | None":
+    # quotePath=false：中文等非 ASCII 路径原样输出，否则 diff 头会变成 "b/\351..." 而漏扫
     try:
         return subprocess.Popen(
-            ["git", "-C", str(root), *args],
+            ["git", "-C", str(root), "-c", "core.quotePath=false", *args],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         )
     except OSError:
         return None
 
 
-def scan_history(root: Path, findings: Findings, unpushed_only: bool = False) -> bool:
-    """流式扫描历史；unpushed_only 时只扫本地分支上未出现在任何 remote 的提交。"""
+def scan_history(root: Path, findings: Findings, unpushed_only: bool = False,
+                 remote: str | None = None) -> bool:
+    """流式扫描历史，返回 git 是否成功输出。
+
+    unpushed_only 时只扫本地分支与标签上尚未出现在 remote 的提交；指定 remote 时只与该
+    remote 比较——推到新的公开 remote 时，已在私有 remote 上的历史同样会被公开。
+    """
     args = ["log", "-p", "--no-color", "--no-ext-diff", "--full-history"]
     if unpushed_only:
-        args += ["--branches", "--not", "--remotes"]
+        args += ["--branches", "--tags", "--not", f"--remotes={remote}" if remote else "--remotes"]
     else:
         args += ["--all"]
     proc = run_git_bytes(root, args)
     if proc is None:
+        findings.add("high", "history-scan-failed", "<history>", scope="history")
         return False
     lines: list[str] = []
     total = 0
@@ -365,12 +446,17 @@ def scan_history(root: Path, findings: Findings, unpushed_only: bool = False) ->
     finally:
         if proc.stdout is not None:
             proc.stdout.close()
-        proc.kill()
-        proc.wait()
+        if truncated:
+            proc.kill()
+        returncode = proc.wait()
     _scan_diff(iter(lines), findings, scope="history")
     if truncated:
         findings.add("medium", "history-scan-truncated", "<history>", scope="history")
-    return truncated
+    elif returncode != 0:
+        # 未能确认历史范围时按阻断处理，不把"没扫到"当成"没有"
+        findings.add("high", "history-scan-failed", "<history>", scope="history")
+        return False
+    return True
 
 
 def scan_staged(root: Path, findings: Findings) -> None:
@@ -419,14 +505,17 @@ def apply_baseline(findings: list[dict], baseline: dict) -> tuple[list[dict], li
 
 
 def scan(root: Path, scan_history_flag: bool = False, staged_flag: bool = False,
-         unpushed_flag: bool = False, baseline_path: Path | None = None) -> dict:
+         unpushed_flag: bool = False, baseline_path: Path | None = None,
+         remote: str | None = None) -> dict:
     findings = Findings()
     scan_worktree(root, findings)
     history_scanned = False
-    if (scan_history_flag or unpushed_flag) and git_candidates(root) is not None:
-        scan_history(root, findings, unpushed_only=unpushed_flag)
-        history_scanned = True
-    if staged_flag and git_candidates(root) is not None:
+    in_git = git_candidates(root) is not None
+    if (scan_history_flag or unpushed_flag) and in_git:
+        # 同时指定时以全量为准，范围只放大不缩小
+        history_scanned = scan_history(root, findings, unpushed_only=unpushed_flag and not scan_history_flag,
+                                       remote=remote)
+    if staged_flag and in_git:
         scan_staged(root, findings)
 
     baseline: dict = {"version": 1, "entries": []}
@@ -461,7 +550,9 @@ def main() -> int:
     parser.add_argument("root", nargs="?", default=".", help="项目根目录")
     parser.add_argument("--json", action="store_true", help="输出 JSON")
     parser.add_argument("--scan-history", action="store_true", help="扫描全部 Git 历史（新增行）")
-    parser.add_argument("--unpushed", action="store_true", help="只扫描未推送到任何 remote 的本地提交")
+    parser.add_argument("--unpushed", action="store_true", help="只扫描未推送到任何 remote 的本地分支与标签提交")
+    parser.add_argument("--remote", default=None,
+                        help="配合 --unpushed：只与该 remote 比较（推到新的公开 remote 前使用）")
     parser.add_argument("--staged", action="store_true", help="只扫描 staged diff 的新增行")
     parser.add_argument("--baseline", type=Path, default=None,
                         help="基线文件路径（默认 <root>/.safe-publish-baseline.json）")
@@ -475,7 +566,7 @@ def main() -> int:
 
     baseline = args.baseline if args.baseline is not None else root / ".safe-publish-baseline.json"
     result = scan(root, scan_history_flag=args.scan_history, staged_flag=args.staged,
-                  unpushed_flag=args.unpushed, baseline_path=baseline)
+                  unpushed_flag=args.unpushed, baseline_path=baseline, remote=args.remote)
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
